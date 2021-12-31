@@ -1,3 +1,5 @@
+// Copyright Epic Games, Inc. All Rights Reserved.
+
 #include "RiderPathLocator/RiderPathLocator.h"
 
 #include "HAL/FileManager.h"
@@ -9,21 +11,39 @@
 
 #if PLATFORM_LINUX
 
-TOptional<FInstallInfo> FRiderPathLocator::GetInstallInfoFromRiderPath(const FString& PathToRiderApp, FInstallInfo::EInstallType InstallType)
+TOptional<FInstallInfo> FRiderPathLocator::GetInstallInfoFromRiderPath(const FString& Path, FInstallInfo::EInstallType InstallType)
 {
-	if(!FPaths::DirectoryExists(PathToRiderApp)) return {};
+	if(!FPaths::FileExists(Path))
+	{
+		return {};
+	}
+	
+	const FString PatternString(TEXT("(.*)(?:\\\\|/)bin"));
+	const FRegexPattern Pattern(PatternString);
+	FRegexMatcher RiderPathMatcher(Pattern, Path);
+	if (!RiderPathMatcher.FindNext())
+	{
+		return {};
+	}
 
-	const FString RiderCppPluginPath = FPaths::Combine(PathToRiderApp, TEXT("plugins"), TEXT("rider-cpp"));
-
-	if (!FPaths::DirectoryExists(RiderCppPluginPath)) return {};
+	const FString RiderDir = RiderPathMatcher.GetCaptureGroup(1);
+	const FString RiderCppPluginPath = FPaths::Combine(RiderDir, TEXT("plugins"), TEXT("rider-cpp"));
+	if (!FPaths::DirectoryExists(RiderCppPluginPath))
+	{
+		return {};
+	}
 	
 	FInstallInfo Info;
-	Info.Path = FPaths::Combine(PathToRiderApp, TEXT("bin"), TEXT("rider.sh"));
+	Info.Path = Path;
 	Info.InstallType = InstallType;
-	const FString ProductInfoJsonPath = FPaths::Combine(PathToRiderApp, TEXT("product-info.json"));
+	const FString ProductInfoJsonPath = FPaths::Combine(RiderDir, TEXT("product-info.json"));
 	if (FPaths::FileExists(ProductInfoJsonPath))
 	{
 		ParseProductInfoJson(Info, ProductInfoJsonPath);
+	}
+	if(!Info.Version.IsInitialized())
+	{
+		Info.Version = FPaths::GetBaseFilename(RiderDir);
 	}
 	return Info;
 }
@@ -48,7 +68,7 @@ static TArray<FInstallInfo> GetManuallyInstalledRiders()
 	const FString FHomePath = GetHomePath();
 
 	const FString LocalPathMask = FPaths::Combine(FHomePath, TEXT("Rider*"));
-	
+
 	IFileManager::Get().FindFiles(RiderPaths, *LocalPathMask, false, true);
 
 	for(const FString& RiderPath: RiderPaths)
@@ -56,7 +76,9 @@ static TArray<FInstallInfo> GetManuallyInstalledRiders()
 		FString FullPath = FPaths::Combine(FHomePath, RiderPath);
 		TOptional<FInstallInfo> InstallInfo = FRiderPathLocator::GetInstallInfoFromRiderPath(FullPath, FInstallInfo::EInstallType::Installed);
 		if(InstallInfo.IsSet())
+		{
 			Result.Add(InstallInfo.GetValue());
+		}
 	}
 	return Result;
 }
@@ -71,28 +93,41 @@ static FString GetToolboxPath()
 
 static TArray<FInstallInfo> GetInstalledRidersWithMdfind()
 {
-    int32 ReturnCode;
-    FString OutResults;
-    FString OutErrors;
-    FPlatformProcess::ExecProcess(TEXT("/usr/bin/mdfind"), TEXT("\"kMDItemKind == Application\""), &ReturnCode, &OutResults, &OutErrors);
-    if (ReturnCode != 0)
-		return {};
+	int32 ReturnCode;
+	FString OutResults;
+	FString OutErrors;
 
-    TArray<FString> RiderPaths;
+	// avoid trying to run mdfind if it doesnt exists
+	if (!FPaths::FileExists(TEXT("/usr/bin/mdfind")))
+	{
+		return {};
+	}
+
+	FPlatformProcess::ExecProcess(TEXT("/usr/bin/mdfind"), TEXT("\"kMDItemKind == Application\""), &ReturnCode, &OutResults, &OutErrors);
+	if (ReturnCode != 0)
+	{
+		return {};
+	}
+
+	TArray<FString> RiderPaths;
 	FString TmpString;
 	while(OutResults.Split(TEXT("\n"), &TmpString, &OutResults))
 	{
 		if(TmpString.Contains(TEXT("Rider")))
+		{
 			RiderPaths.Add(TmpString);
+		}
 	}
-    TArray<FInstallInfo> Result;
-    for(const FString& RiderPath: RiderPaths)
-    {
-        TOptional<FInstallInfo> InstallInfo = FRiderPathLocator::GetInstallInfoFromRiderPath(RiderPath, FInstallInfo::EInstallType::Installed);
-        if(InstallInfo.IsSet())
-            Result.Add(InstallInfo.GetValue());
-    }
-    return Result;
+	TArray<FInstallInfo> Result;
+	for(const FString& RiderPath: RiderPaths)
+	{
+		TOptional<FInstallInfo> InstallInfo = FRiderPathLocator::GetInstallInfoFromRiderPath(RiderPath, FInstallInfo::EInstallType::Installed);
+		if(InstallInfo.IsSet())
+		{
+			Result.Add(InstallInfo.GetValue());
+		}
+	}
+	return Result;
 }
 
 TSet<FInstallInfo> FRiderPathLocator::CollectAllPaths()
