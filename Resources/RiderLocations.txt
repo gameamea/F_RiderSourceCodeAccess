@@ -5,4 +5,4 @@
 #    /Users/user.name/Library/Application Support/JetBrains/Toolbox/apps/Rider For Unreal Engine/ch-0/212.4488.6/Rider.app
 # Linux - PATH TO RIDER MAIN FOLDER ONLY:
 #    /home/user/.local/share/JetBrains/Toolbox/apps/Rider/ch-0/211.7442.29
-#    /opt/RiderForUnrealEngine
+/opt/RiderForUnrealEngine
